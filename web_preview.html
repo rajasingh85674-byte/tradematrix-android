@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simons Quant Terminal - Preview</title>
+<style>
+  :root{--bg:#0B0E14;--panel:#131722;--border:#2A2E39;--text:#D1D4DC;--muted:#787B86;
+        --up:#26A69A;--down:#EF5350;--accent:#2962FF;--neutral:#434651}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:12px}
+  header{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0 auto 0 0;color:var(--muted);font-weight:600}
+  select{background:var(--panel);color:var(--text);border:1px solid var(--border);
+         border-radius:8px;padding:10px 12px;font-size:14px}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns:2fr 1fr}}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .lbl{font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .price{font-size:38px;font-weight:700;margin-top:4px}
+  .sig{display:flex;align-items:center;gap:16px}
+  .dot{width:60px;height:60px;border-radius:50%;background:var(--neutral);flex:none;
+       box-shadow:0 0 0 6px rgba(255,255,255,.03)}
+  .dir{font-size:30px;font-weight:800;color:var(--muted)}
+  .sub{font-size:13px;color:var(--muted)}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .stat .v{font-size:19px;font-weight:700;margin-top:4px}
+  .bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:10px}
+  .bar>i{display:block;height:100%;width:0;background:var(--neutral);transition:width .4s}
+  canvas{width:100%;height:320px;display:block}
+  ul{margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.6}
+  .btns{display:flex;gap:10px;margin-top:12px}
+  button{flex:1;border:0;border-radius:10px;padding:16px;font-size:15px;font-weight:700;
+         color:#fff;cursor:pointer}
+  #scan{background:var(--accent)} #exec{background:var(--neutral)}
+  button:disabled{opacity:.6;cursor:wait}
+  .status{font-size:12px;color:var(--muted);margin-top:8px;text-align:center}
+  .up{color:var(--up)} .down{color:var(--down)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SIMONS QUANT TERMINAL &middot; WEB PREVIEW</h1>
+    <select id="sym"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option>
+      <option>BNBUSDT</option><option>XRPUSDT</option></select>
+    <select id="tf"><option>5m</option><option selected>15m</option><option>1h</option>
+      <option>4h</option><option>1d</option></select>
+  </header>
+
+  <div class="grid">
+    <div class="panel"><div class="lbl">Chart</div><canvas id="chart"></canvas></div>
+
+    <div>
+      <div class="panel"><div class="lbl">Live price</div><div class="price" id="price">--</div></div>
+      <div class="panel" style="margin-top:12px">
+        <div class="sig"><div class="dot" id="dot"></div>
+          <div><div class="dir" id="dir">NO SIGNAL</div><div class="sub" id="sub">Press SCAN MARKET</div></div>
+        </div>
+        <div class="bar"><i id="bar"></i></div>
+        <div class="stats">
+          <div class="stat panel"><div class="lbl">Target (TP)</div><div class="v" id="tp">--</div></div>
+          <div class="stat panel"><div class="lbl">Stop loss (SL)</div><div class="v" id="sl">--</div></div>
+          <div class="stat panel"><div class="lbl">Pattern</div><div class="v" id="pat">--</div></div>
+          <div class="stat panel"><div class="lbl">Confidence</div><div class="v" id="conf">--</div></div>
+        </div>
+        <ul id="why"></ul>
+        <div class="btns">
+          <button id="scan">SCAN MARKET</button>
+          <button id="exec">EXECUTE LIVE TRADE</button>
+        </div>
+        <div class="status" id="status">Preview only - no orders are ever sent from this page.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const HOSTS = ["https://data-api.binance.vision", "https://api.binance.com"];
+const UP = "#26A69A", DOWN = "#EF5350", NEUTRAL = "#434651";
+
+async function api(path) {
+  let err;
+  for (const h of HOSTS) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch(h + path, {signal: ctl.signal});
+      clearTimeout(t);
+      if (r.ok) return await r.json();
+      err = r.status;
+    } catch (e) { err = e; }
+  }
+  throw new Error("Data feed unreachable: " + err);
+}
+
+function demoCandles(n = 120) {
+  let p = 60000, out = [];
+  for (let i = 0; i < n; i++) {
+    const o = p, c = o + (Math.random() - .5) * 400;
+    out.push({o, h: Math.max(o, c) + Math.random() * 150, l: Math.min(o, c) - Math.random() * 150, c});
+    p = c;
+  }
+  return out;
+}
+
+function ema(a, n) { const k = 2 / (n + 1); let e = a[0]; return a.map(v => (e = v * k + e * (1 - k))); }
+function rsi(a, n = 14) {
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = a[i] - a[i - 1]; d > 0 ? g += d : l -= d; }
+  g /= n; l /= n;
+  for (let i = n + 1; i < a.length; i++) {
+    const d = a[i] - a[i - 1];
+    g = (g * (n - 1) + Math.max(d, 0)) / n; l = (l * (n - 1) + Math.max(-d, 0)) / n;
+  }
+  return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+}
+
+function draw(c) {
+  const cv = $("chart"), dpr = window.devicePixelRatio || 1;
+  cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+  const x = cv.getContext("2d"); x.scale(dpr, dpr);
+  const W = cv.clientWidth, H = cv.clientHeight;
+  const hi = Math.max(...c.map(k => k.h)), lo = Math.min(...c.map(k => k.l));
+  const y = v => H - 8 - (v - lo) / (hi - lo || 1) * (H - 16);
+  const w = W / c.length;
+  c.forEach((k, i) => {
+    const col = k.c >= k.o ? UP : DOWN, cx = i * w + w / 2;
+    x.strokeStyle = x.fillStyle = col;
+    x.beginPath(); x.moveTo(cx, y(k.h)); x.lineTo(cx, y(k.l)); x.stroke();
+    const t = y(Math.max(k.o, k.c)), b = y(Math.min(k.o, k.c));
+    x.fillRect(cx - w * .35, t, w * .7, Math.max(1, b - t));
+  });
+}
+
+function setSignal(dir, price, atr, score, pattern, reasons) {
+  const col = dir === "BUY" ? UP : dir === "SELL" ? DOWN : NEUTRAL;
+  $("dot").style.background = col;
+  $("dir").textContent = dir === "BUY" ? "BUY / UP" : dir === "SELL" ? "SELL / DOWN" : "HOLD";
+  $("dir").style.color = dir === "HOLD" ? "var(--muted)" : col;
+  const slD = 1.5 * atr;
+  const act = dir !== "HOLD";
+  $("tp").textContent = act ? (dir === "BUY" ? price + 3 * slD : price - 3 * slD).toFixed(2) : "--";
+  $("sl").textContent = act ? (dir === "BUY" ? price - slD : price + slD).toFixed(2) : "--";
+  $("tp").className = "v up"; $("sl").className = "v down";
+  $("pat").textContent = pattern;
+  const conf = Math.min(99, Math.abs(score) / 6.5 * 100);
+  $("conf").textContent = conf.toFixed(0) + "%";
+  $("bar").style.width = conf + "%"; $("bar").style.background = col;
+  $("exec").style.background = act ? col : NEUTRAL;
+  $("why").innerHTML = reasons.map(r => "<li>" + r + "</li>").join("");
+}
+
+async function scan() {
+  $("scan").disabled = true; $("status").textContent = "Scanning...";
+  const s = $("sym").value, tf = $("tf").value;
+  try {
+    const k = await api(`/api/v3/klines?symbol=${s}&interval=${tf}&limit=150`);
+    const c = k.map(r => ({o: +r[1], h: +r[2], l: +r[3], c: +r[4]}));
+    const closed = c.slice(0, -1), cl = closed.map(v => v.c);
+    const e20 = ema(cl, 20).at(-1), e50 = ema(cl, 50).at(-1), r = rsi(cl);
+    let atr = 0;
+    closed.slice(-14).forEach((v, i, a) => {
+      const pc = i ? a[i - 1].c : v.o;
+      atr += Math.max(v.h - v.l, Math.abs(v.h - pc), Math.abs(v.l - pc));
+    });
+    atr /= 14;
+    let score = 0, why = [];
+    if (e20 > e50) { score += 1; why.push("EMA20 > EMA50 (uptrend)"); } else { score -= 1; why.push("EMA20 < EMA50 (downtrend)"); }
+    if (r < 30) { score += 2; why.push("RSI " + r.toFixed(1) + " oversold"); }
+    else if (r > 70) { score -= 2; why.push("RSI " + r.toFixed(1) + " overbought"); }
+    else why.push("RSI " + r.toFixed(1) + " neutral");
+    const price = c.at(-1).c;
+    $("price").textContent = price.toLocaleString(undefined, {minimumFractionDigits: 2});
+    const dir = score >= 2 ? "BUY" : score <= -2 ? "SELL" : "HOLD";
+    why.push("Preview uses a simplified score; the app runs the full matrix.");
+    setSignal(dir, price, atr, score, "n/a (preview)", why);
+    draw(c);
+    $("status").textContent = "Live data loaded from Binance public API.";
+  } catch (e) {
+    const c = demoCandles(); draw(c);
+    const p = c.at(-1).c;
+    $("price").textContent = p.toFixed(2);
+    setSignal("BUY", p, 250, 4.5, "Bullish Engulfing", ["Demo data (offline)", "RSI 28.4 oversold", "Pattern: Bullish Engulfing"]);
+    $("status").textContent = "Offline - showing demo data.";
+  }
+  $("scan").disabled = false;
+}
+
+$("scan").onclick = scan;
+$("exec").onclick = () => alert("Preview only. Orders can only be sent from the Android/desktop app.");
+window.addEventListener("resize", scan);
+scan();
+</script>
+</body>
+</html>
