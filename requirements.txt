@@ -1,0 +1,10 @@
+kivy>=2.3.0
+ccxt>=4.3.0
+numpy
+pandas>=2.0
+pandas-ta
+requests
+certifi
+urllib3
+idna
+charset-normalizer
