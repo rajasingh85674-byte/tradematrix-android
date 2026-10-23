@@ -679,3 +679,31 @@ class TradingApp(App):
 
 if __name__ == "__main__":
     TradingApp().run()
+from kivy.app import App
+from kivy.clock import Clock
+
+from risk_manager import RiskManager
+
+
+class TradeMatrixApp(App):
+    def build(self):
+        self.risk = RiskManager(target_profit_pct=2.0, stop_loss_pct=1.5)
+        self.entry_price = None          # set when a BUY order fills
+        # ... build your UI here ...
+        Clock.schedule_interval(self.check_risk, 2)   # check every 2 seconds
+        return super().build()
+
+    def on_buy_filled(self, fill_price):
+        self.entry_price = fill_price
+        levels = self.risk.calculate_levels(fill_price)
+        print(f"TP {levels['target_price']} | SL {levels['stop_price']}")
+
+    def check_risk(self, dt):
+        if self.entry_price is None:
+            return
+        live_price = self.get_live_price()      # your existing price feed
+        result = self.risk.evaluate_trade(self.entry_price, live_price)
+        if result["status"] == "TRIGGER_EXIT":
+            self.entry_price = None             # stop re-triggering
+            self.place_order(result["action"])  # your existing order function
+            print(result["reason"], result["message"])
