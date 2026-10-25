@@ -747,3 +747,9 @@ class TradeMatrixApp(App):
 
 if __name__ == "__main__":
     TradeMatrixApp().run()
+from voice_assistant import VoiceAssistant
+
+self.voice = VoiceAssistant()           # in build()
+self.voice.speak("Hello from TradeMatrix")
+self.voice.stop()                       # e.g. for a STOP button
+self.voice.shutdown()                   # in on_stop()
